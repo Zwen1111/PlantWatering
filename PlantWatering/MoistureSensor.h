@@ -12,9 +12,17 @@
 class MoistureSensor {
 public:
 	MoistureSensor();
-	MoistureSensor(int pin);
+
+	static MoistureSensor& getInst() {
+		static MoistureSensor instance;
+		return instance;
+	}
 
 	int getValue();
+	void setPin(int pin) {
+		this->pin = pin;
+		pinMode(pin, INPUT);
+	}
 
 	int pin;
 };

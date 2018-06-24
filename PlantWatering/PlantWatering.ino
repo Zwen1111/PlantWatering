@@ -1,10 +1,8 @@
 #include "MoistureSensor.h"
-#include "MoistureSensor.h"
 #include <ESP8266WiFi.h>
 #include <MySQL_Connection.h>
 #include <MySQL_Cursor.h>
-#include <sstream>
-#include <string>
+#include "HttpServer.h"
 
 #define MOISTURE_PIN 0
 
@@ -19,6 +17,12 @@ char* dbPass = "3458Erkelens!";        // MySQL user login password
 WiFiClient client;
 MySQL_Connection conn((Client *)&client);
 
+// 
+// Server@port
+//
+const int PORT = 8080;
+WiFiServer wifiServer(PORT);
+
 MoistureSensor moistureSensor;
 
 void connectToDatabase() {
@@ -31,14 +35,14 @@ void connectToDatabase() {
 		Serial.println("Connection failed.");
 }
 
-void InsertInto(std::string value) {
-	std::string insert = "INSERT INTO moisture.moisture (moistureValue) VALUES (" + value +")";
+void InsertInto(String value) {
+	String insert = "INSERT INTO moisture.moisture (moistureValue) VALUES (" + value +")";
 
 	// Initiate the query class instance
 	MySQL_Cursor *cur_mem = new MySQL_Cursor(&conn);
 	// Execute the query
 	char query[80];
-	strcpy(query, insert.c_str);
+	insert.toCharArray(query, 80);
 	cur_mem->execute(query);
 	// Note: since there are no results, we do not need to read any data
 	// Deleting the cursor also frees up memory used
@@ -69,16 +73,85 @@ void setup() {
 	Serial.println("IP address: ");
 	Serial.println(WiFi.localIP());
 
-	connectToDatabase();
+	//connectToDatabase();
 
-	moistureSensor = MoistureSensor(0);
+	//
+	// Start server
+	//
+	wifiServer.begin();
+	Serial.printf("\n\r>%s: BIEM! connected.\n\r", __FUNCTION__);
+
+	moistureSensor = MoistureSensor::getInst();
+	moistureSensor.setPin(MOISTURE_PIN);
+
+	//server = HttpServer();
+}
+
+//
+// HTTP GET response message
+//
+String getResponseString() {
+	String res = "";
+	res += "HTTP/1.1 200 OK\r\n";
+	res += "Connection: close\r\n";
+	res += "Content-Type: application/json\r\n";
+	res += "\r\n";
+
+	String str = "{\"moisture\":";
+	str += String(MoistureSensor::getInst().getValue());
+	str += "}\r\n";
+
+	res += str;
+	res += "\r\n";
+	return res;
+}
+
+//
+// HTTP POST response message
+//
+String postResponseString() {
+	String res = "";
+	res += "HTTP/1.1 200 OK\r\n";
+	res += "Connection: close\r\n";
+	res += "Content-Type: application/json\r\n";
+	res += "\r\n";
+	res += "{\"msg\":\"Have a nice day\"}\r\n";
+	res += "\r\n";
+	return res;
 }
 
 // the loop function runs over and over again until power down or reset
 void loop() {
-	int moistureValue = moistureSensor.getValue();
-	std::stringstream ss;
-	ss << moistureValue;
-	InsertInto(ss.str());
-	delay(300000);
+	WiFiClient client = wifiServer.available();
+
+	if (client) {
+		String httpHeader = "";
+
+		while (client.connected()) {
+
+			if (client.available()) {
+
+				String line = client.readStringUntil('\r');
+				httpHeader += line;
+
+				if (line.length() == 1 && line[0] == '\n') {
+
+					// Handle GET
+					if (HttpServer::GET == HttpServer::parseHeader(httpHeader)) {
+						client.println(getResponseString());
+						break;
+					}
+
+					// Handle POST
+					if (HttpServer::POST == HttpServer::parseHeader(httpHeader)) {
+						String body = client.readStringUntil('\r');
+						client.println(postResponseString());
+						Serial.println(body);
+						break;
+					}
+				}
+			}
+		}
+		client.stop();
+	}
 }
